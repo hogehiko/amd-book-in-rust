@@ -1,6 +1,5 @@
-use std::{rc::Rc, sync::Mutex};
-
-
+use core::hash;
+use std::{collections::HashMap, rc::Rc, sync::Mutex};
 
 
 fn main() {
@@ -11,7 +10,7 @@ fn main() {
 
 struct Node{
     hash_value: u64,
-    resources: Vec<u64>,
+    resources: HashMap<u64, u64>,
     next: Option<Rc<Node>>,
     previous: Option<Rc<Node>>,
 }
@@ -50,18 +49,49 @@ impl HashRing{
         }
     }
 
-    fn lookup_node_mut(&mut self, hash_value: u64) -> Option<&mut Node>{
+    fn lookup_node_mut(&mut self, hash_value: u64) -> &mut Node{
         if self.is_in_legal_range(hash_value){
             let Some(node) =  self.head.as_mut() else {
-                return None;
+                panic!("No nodes in the ring");
             };
-            while self.distance(node.hash_value, hash_value) > 
-                self.distance(node.next.as_ref().unwrap().hash_value, hash_value){
-                    let Some(next_node) = node.next.as_mut() else {
-                        break;
-                    };
-                    node = next_node;
-                }
+            let mut temp = node;
+            while self.distance(temp.hash_value, hash_value) > 
+                self.distance(temp.next.as_ref().unwrap().hash_value, hash_value){
+                    temp = temp.next;
+                let Some(next_node) = temp.next.as_mut() else {
+                    break;
+                };
+            }
+        }
+    }
+
+    fn move_resources(self, dist: &Node, orig: &Node, delete_true: bool){
+        let mut delete_list = vec![];
+        for (i, j) in &dist.resources{
+            if self.distance(i , dist.hash_value < self.distance(i, orig.hash_value) || delete_true){
+                dist.resources[*i] = *j;
+                delete_list.push(*i);
+                println!("move resource {} from {} to {}", i, orig.hash_value, dist.hash_value);
+            }
+        }
+
+        for i in delete_list{
+            orig.resources.remove(&i);
+        }
+    }
+
+    fn add_node(&mut self, hash_value: u64) -> bool{
+        if self.legal_range(hash_value){
+            let mut new_node = Rc::new(Node::new(hash_value));
+
+            if self.head.is_none(){
+                new_node.next = Some(new_node.clone());
+                new_node.previous = Some(new_node.clone());
+                self.head = Some(new_node);
+                println!("Adding a head node {}", hash_value);
+            }else{
+                let temp = self.lookup_node_mut(hash_value).unwrap();
+            }
         }
     }
 }
