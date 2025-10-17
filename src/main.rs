@@ -1,5 +1,5 @@
 use core::hash;
-use std::{collections::HashMap, rc::Rc, sync::Mutex};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Mutex};
 
 
 fn main() {
@@ -8,22 +8,28 @@ fn main() {
    
 }
 
+
 struct Node{
     hash_value: u64,
     resources: HashMap<u64, u64>,
-    next: Option<Rc<Node>>,
-    previous: Option<Rc<Node>>,
+    next: Option<NodeRef>,
+    previous: Option<NodeRef>,
 }
+
+type NodeRef = Rc<RefCell<Node>>;
 
 impl Node{
     fn new(hash_value: u64) -> Self{
-        Self { hash_value, resources: vec![], next: None, previous: None }
+        Self { hash_value, resources: HashMap::new(), next: None, previous: None }
     }
 
+    fn next(&self) -> NodeRef{
+        self.next.as_ref().unwrap().clone()
+    }
 }
 
 struct HashRing{
-    head: Option<Rc<Node>>,
+    head: Option<NodeRef>,
     k: u32,
     min: u64,
     max: u64,
@@ -34,7 +40,11 @@ impl HashRing{
         Self { head: None, k, min: 0, max: 2u64.pow(k) - 1 }
     }
 
-    
+    fn head(&self) -> NodeRef{
+        // in initial state, head is itself.
+        self.head.as_ref().unwrap().clone()
+    }
+
     fn is_in_legal_range(&self, hash_value: u64) -> bool {
         hash_value >= self.min && hash_value <= self.max
     }
@@ -49,48 +59,52 @@ impl HashRing{
         }
     }
 
-    fn lookup_node_mut(&mut self, hash_value: u64) -> &mut Node{
+    fn lookup_node_mut(&mut self, hash_value: u64) -> NodeRef{
         if self.is_in_legal_range(hash_value){
-            let Some(node) =  self.head.as_mut() else {
-                panic!("No nodes in the ring");
-            };
-            let mut temp = node;
-            while self.distance(temp.hash_value, hash_value) > 
-                self.distance(temp.next.as_ref().unwrap().hash_value, hash_value){
-                    temp = temp.next;
-                let Some(next_node) = temp.next.as_mut() else {
-                    break;
-                };
+            let mut temp = self.head();
+            let next = temp.borrow().next();
+
+            while self.distance(temp.borrow().hash_value, hash_value) >
+                self.distance(next.borrow().hash_value, hash_value){
+                    // temp = temp.nesxt;
+                    temp = next.clone();
+                    if temp.borrow().hash_value == hash_value{
+                        return temp
+                    }
             }
+            return next;
         }
+        panic!("Hash value out of range");
     }
 
-    fn move_resources(self, dist: &Node, orig: &Node, delete_true: bool){
+    fn move_resources(&mut self, dest: &mut Node, orig: &mut Node, delete_true: bool){
         let mut delete_list = vec![];
-        for (i, j) in &dist.resources{
-            if self.distance(i , dist.hash_value < self.distance(i, orig.hash_value) || delete_true){
-                dist.resources[*i] = *j;
+        for (i, j) in orig.resources.iter(){
+            if self.distance(*i, dest.hash_value) < self.distance(*i, orig.hash_value) || delete_true{
+                dest.resources.insert(*i, *j);
                 delete_list.push(*i);
-                println!("move resource {} from {} to {}", i, orig.hash_value, dist.hash_value);
             }
         }
 
-        for i in delete_list{
-            orig.resources.remove(&i);
+        for i in delete_list.iter(){
+            orig.resources.remove(i);
         }
     }
 
-    fn add_node(&mut self, hash_value: u64) -> bool{
-        if self.legal_range(hash_value){
-            let mut new_node = Rc::new(Node::new(hash_value));
+    fn add_node(&mut self, hash_value: u64){
+        if self.is_in_legal_range(hash_value){
+            let new_node = Rc::new(RefCell::new(Node::new(hash_value)));
 
             if self.head.is_none(){
-                new_node.next = Some(new_node.clone());
-                new_node.previous = Some(new_node.clone());
+                new_node.as_ref().borrow_mut().next = Some(new_node.clone());
+                new_node.as_ref().borrow_mut().previous = Some(new_node.clone());
                 self.head = Some(new_node);
-                println!("Adding a head node {}", hash_value);
+                println!("Added head node with hash value {}", hash_value);
             }else{
-                let temp = self.lookup_node_mut(hash_value).unwrap();
+                let temp = self.lookup_node_mut(hash_value);
+                new_node.as_ref().borrow_mut().next = Some(temp.clone());
+                new_node.as_ref().borrow_mut().previous = Some(temp.borrow().previous.as_ref().unwrap().clone());
+                println!("Added node with hash value {}", hash_value);
             }
         }
     }
