@@ -1,5 +1,5 @@
 use core::hash;
-use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc, sync::Mutex};
+use std::{cell::RefCell, collections::HashMap, ops::{Deref, DerefMut}, rc::Rc, sync::Mutex};
 
 
 fn main() {
@@ -9,42 +9,103 @@ fn main() {
 }
 
 
-struct Node<'a>{
+type NodeRef = Rc<RefCell<Node>>;
+
+trait NodeRefExt{
+    fn insert(self, hash_value: u64, value: u64);
+
+    fn hash_value(&self) -> u64;
+
+    fn resources(&self) -> HashMap<u64, u64>;
+
+    fn next(&self) -> NodeRef;
+
+    fn previous(&self) -> NodeRef;
+
+    fn set_next(&self, next: NodeRef);
+
+    fn set_previous(&   self, previous: NodeRef);
+}
+
+impl NodeRefExt for NodeRef{
+    fn insert(self, hash_value: u64, value: u64){
+        self.as_ref().borrow_mut().resources.insert(hash_value, value);
+    }
+
+    fn hash_value(&self) -> u64 {
+        self.as_ref().borrow().hash_value
+    }
+
+    fn resources(&self) -> HashMap<u64, u64>{
+        self.as_ref().borrow().resources.clone()
+    }
+
+    fn next(&self) -> NodeRef{
+        if let Some(next) = self.as_ref().borrow().next.as_ref(){
+            next.clone()
+        }else{
+            panic!("Next node is None");
+        }
+    }
+
+    fn previous(&self) -> NodeRef{
+        if let Some(previous) = self.as_ref().borrow().previous.as_ref(){
+            previous.clone()
+        }else{
+            panic!("Previous node is None");
+        }
+    }
+
+    fn set_next(&self, next: NodeRef){
+        self.as_ref().borrow_mut().next = Some(next);
+    }
+
+    fn set_previous(&self, previous: NodeRef){
+        self.as_ref().borrow_mut().previous = Some(previous);
+    }
+}
+
+struct Node{
     hash_value: u64,
     resources: HashMap<u64, u64>,
-    next: Option<&'a mut Node<'a>>,
-    previous: Option<&'a mut Node<'a>>,
+    next: Option<NodeRef>, // if none, refer to itself
+    previous: Option<NodeRef>, // if none, refer to itself
 }
 
 
-impl <'a> Node<'a>{
+impl Node{
     fn new(hash_value: u64) -> Self{
         Self { hash_value, resources: HashMap::new(), next: None, previous: None }
     }
 
-    fn next(&'a mut self) -> &'a mut Node<'a>{
-        self.next.as_mut().unwrap()
+    fn next(&self) -> NodeRef{
+        if let Some(next) = self.next.as_ref(){
+            next.clone()
+        }else{
+            panic!("Next node is None");
+        }
     }
+
 }
 
-struct HashRing<'a>{
-    head: Option<&'a mut Node<'a>>,
+struct HashRing{
+    head: Option<NodeRef>,
     k: u32,
     min: u64,
     max: u64,
 }
 
-impl<'a> HashRing<'a>{
+impl HashRing{
     fn new(k: u32) -> Self{
         Self { head: None, k, min: 0, max: 2u64.pow(k) - 1 }
     }
 
-    fn head(&self) -> &Node<'a>{
+    fn head(&self) -> NodeRef{
         // in initial state, head is itself.
-        self.head.as_ref().unwrap()
+        self.head.as_ref().unwrap().clone()
     }
 
-    fn head_mut(&mut self) -> &mut Node<'a>{
+    fn head_mut(&mut self) -> &mut NodeRef{
         self.head.as_mut().unwrap()
     }
 
@@ -62,16 +123,16 @@ impl<'a> HashRing<'a>{
         }
     }
 
-    fn lookup_node_mut(&mut self, hash_value: u64) -> &mut Node<'a>{
+    fn lookup_node_mut(&mut self, hash_value: u64) -> NodeRef{
         if self.is_in_legal_range(hash_value){
             let mut temp = self.head();
             let next = temp.next();
 
-            while self.distance(temp.hash_value, hash_value) >
-                self.distance(next.hash_value, hash_value){
+            while self.distance(temp.hash_value(), hash_value) >
+                self.distance(next.hash_value(), hash_value){
                     // temp = temp.nesxt;``
-                    temp = temp.next();
-                    if temp.hash_value == hash_value{
+                    temp = temp.next().clone();
+                    if temp.hash_value() == hash_value{
                         return temp
                     }
             }
@@ -84,8 +145,9 @@ impl<'a> HashRing<'a>{
         if self.is_in_legal_range(hash_value){
             println!("Adding a resource {} ...", hash_value);
             let target_node = self.lookup_node_mut(hash_value);
-            target_node.borrow_mut().resources.insert(hash_value, hash_value);
-            println!("Added resource with hash value {} to node {}", hash_value, target_node.borrow().hash_value);
+            let target_node_hash = target_node.hash_value();
+            target_node.insert(hash_value, hash_value);
+            println!("Added resource with hash value {} to node {}", hash_value, target_node_hash);
         }
     }
 
@@ -104,24 +166,22 @@ impl<'a> HashRing<'a>{
         }
     }
 
-    fn add_node(&mut self, hash_value: u64){
-        if self.is_in_legal_range(hash_value){
-            let new_node = Rc::new(RefCell::new(Node::new(hash_value)));
-
+    fn add_node(&mut self, new_node: NodeRef){
+        if self.is_in_legal_range(new_node.hash_value()){
             if self.head.is_none(){
-                new_node.as_ref().borrow_mut().next = Some(new_node.clone());
-                new_node.as_ref().borrow_mut().previous = Some(new_node.clone());
-                self.head = Some(new_node);
-                println!("Added head node with hash value {}", hash_value);
+                new_node.set_next(new_node.clone());
+                new_node.set_previous(new_node.clone());
+                self.head = Some(new_node.clone());
+                println!("Added head node with hash value {}", new_node.hash_value());
             }else{
-                let temp = self.lookup_node_mut(hash_value);
-                new_node.as_ref().borrow_mut().next = Some(temp.clone());
-                new_node.as_ref().borrow_mut().previous = Some(temp.borrow().previous.as_ref().unwrap().clone());
-                new_node.as_ref().borrow_mut().previous.as_ref().unwrap().borrow_mut().next = Some(new_node.clone());
-                new_node.as_ref().borrow_mut().next.as_ref().unwrap().borrow_mut().previous = Some(new_node.clone());
-                println!("Added node with hash value {}", hash_value);
-                println!("Its prev is {}", new_node.borrow().previous.as_ref().unwrap().borrow().hash_value);
-                println!("Its next is {}", new_node.borrow().next.as_ref().unwrap().borrow().hash_value);
+                let temp = self.lookup_node_mut(new_node.hash_value());
+                new_node.set_next(temp.clone());
+                new_node.set_previous(temp.previous());
+                new_node.next().set_previous(new_node.clone());
+                new_node.previous().set_next(new_node.clone());
+                println!("Added node with hash value {}", new_node.hash_value());
+                println!("Its prev is {}", new_node.previous().hash_value());
+                println!("Its next is {}", new_node.next().hash_value());
             }
         }
     }
@@ -136,12 +196,12 @@ impl<'a> HashRing<'a>{
         let mut temp = self.head();
         loop{
             {
-                let node = temp.borrow();
-                println!("Node hash value: {}", node.hash_value);
-                println!("Resources: {:?}", node.resources.keys().collect::<Vec<&u64>>());
+                let node = temp.clone();
+                println!("Node hash value: {}", node.hash_value());
+                println!("Resources: {:?}", node.resources().keys().collect::<Vec<&u64>>());
             }
-            temp = temp.clone().borrow().next();
-            if temp.borrow().hash_value == self.head().borrow().hash_value{
+            temp = temp.next();
+            if temp.hash_value() == self.head().hash_value(){
                 break;
             }
         }
@@ -165,8 +225,8 @@ mod tests{
     fn test_scenario(){
         // stdout used
         let mut hr = HashRing::new(5);
-        hr.add_node(12);
-        hr.add_node(18);
+        hr.add_node(RefCell::new(Node::new(12)).into());
+        hr.add_node(RefCell::new(Node::new(18)).into());
         hr.add_resource(24);
         hr.add_resource(21);
         hr.add_resource(16);
