@@ -25,6 +25,10 @@ trait NodeRefExt{
     fn set_next(&self, next: NodeRef);
 
     fn set_previous(&   self, previous: NodeRef);
+
+    fn insert_resource(&self, hash_value: u64, value: u64);
+
+    fn remove_resource(&self, hash_value: u64);
 }
 
 impl NodeRefExt for NodeRef{
@@ -62,6 +66,14 @@ impl NodeRefExt for NodeRef{
 
     fn set_previous(&self, previous: NodeRef){
         self.as_ref().borrow_mut().previous = Some(previous);
+    }
+
+    fn insert_resource(&self, hash_value: u64, value: u64){
+        self.as_ref().borrow_mut().resources.insert(hash_value, value);
+    }
+
+    fn remove_resource(&self, hash_value: u64){
+        self.as_ref().borrow_mut().resources.remove(&hash_value);
     }
 }
 
@@ -126,17 +138,17 @@ impl HashRing{
     fn lookup_node_mut(&mut self, hash_value: u64) -> NodeRef{
         if self.is_in_legal_range(hash_value){
             let mut temp = self.head();
-            let next = temp.next();
+            // let next = temp.next();
 
             while self.distance(temp.hash_value(), hash_value) >
-                self.distance(next.hash_value(), hash_value){
+                self.distance(temp.next().hash_value(), hash_value){
                     // temp = temp.nesxt;``
-                    temp = temp.next().clone();
+                    temp = temp.next();
                     if temp.hash_value() == hash_value{
                         return temp
                     }
             }
-            return next;
+            return temp.next();
         }
         panic!("Hash value out of range");
     }
@@ -152,17 +164,17 @@ impl HashRing{
     }
 
 
-    fn move_resources(&mut self, dest: &mut Node, orig: &mut Node, delete_true: bool){
+    fn move_resources(&mut self, dest: NodeRef, orig: NodeRef, delete_true: bool){
         let mut delete_list = vec![];
-        for (i, j) in orig.resources.iter(){
-            if self.distance(*i, dest.hash_value) < self.distance(*i, orig.hash_value) || delete_true{
-                dest.resources.insert(*i, *j);
+        for (i, j) in orig.resources().iter(){
+            if self.distance(*i, dest.hash_value()) < self.distance(*i, orig.hash_value()) || delete_true{
+                dest.insert_resource(*i, *j);
                 delete_list.push(*i);
             }
         }
 
         for i in delete_list.iter(){
-            orig.resources.remove(i);
+            orig.remove_resource(*i);
         }
     }
 
@@ -182,6 +194,11 @@ impl HashRing{
                 println!("Added node with hash value {}", new_node.hash_value());
                 println!("Its prev is {}", new_node.previous().hash_value());
                 println!("Its next is {}", new_node.next().hash_value());
+
+                self.move_resources(new_node.clone(), new_node.next(),false);
+                if new_node.hash_value() < self.head().hash_value(){
+                    self.head = Some(new_node);
+                }
             }
         }
     }
@@ -236,6 +253,11 @@ mod tests{
         hr.add_resource(28);
         hr.add_resource(7);
         hr.add_resource(10);
+        hr.print_hash_ring();
+
+        hr.add_node(RefCell::new(Node::new(5)).into());
+        hr.add_node(RefCell::new(Node::new(27)).into());
+        hr.add_node(RefCell::new(Node::new(30)).into());
         hr.print_hash_ring();
     }
 
