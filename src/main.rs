@@ -1,11 +1,9 @@
-use core::hash;
-use std::{cell::RefCell, collections::HashMap, ops::{Deref, DerefMut}, rc::Rc, sync::Mutex};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 
 fn main() {
    println!("Hello, world!");
 
-   
 }
 
 
