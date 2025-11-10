@@ -22,6 +22,12 @@ trait NodeRefExt{
     fn insert_resource(&self, hash_value: u64, value: u64);
 
     fn remove_resource(&self, hash_value: u64);
+
+    fn set_finger(&self, index: u64, node: NodeRef);
+
+    fn finger_table(&self) -> HashMap<u64, NodeRef>;
+
+    fn inspect_finger_table(&self) -> Vec<(u64, u64)>;
 }
 
 impl NodeRefExt for NodeRef{
@@ -68,19 +74,32 @@ impl NodeRefExt for NodeRef{
     fn remove_resource(&self, hash_value: u64){
         self.as_ref().borrow_mut().resources.remove(&hash_value);
     }
+
+    fn set_finger(&self, index: u64, node: NodeRef) {
+        self.as_ref().borrow_mut().finger_table.insert(index, node);
+    }
+
+    fn finger_table(&self) -> HashMap<u64, NodeRef> {
+        self.as_ref().borrow().finger_table.clone()
+    }
+
+    fn inspect_finger_table(&self) -> Vec<(u64, u64)> {
+        self.as_ref().borrow().finger_table.iter().map(|(k, v)| (*k, v.hash_value())).collect()
+    }
 }
 
 struct Node{
     hash_value: u64,
     resources: HashMap<u64, u64>,
     next: Option<NodeRef>, // if none, refer to itself
+    finger_table: HashMap<u64, NodeRef>,
     previous: Option<NodeRef>, // if none, refer to itself
 }
 
 
 impl Node{
     fn new(hash_value: u64) -> Self{
-        Self { hash_value, resources: HashMap::new(), next: None, previous: None }
+        Self { hash_value, resources: HashMap::new(), next: None, previous: None, finger_table: HashMap::new() }
     }
 
     fn next(&self) -> NodeRef{
@@ -103,6 +122,14 @@ struct HashRing{
 impl HashRing{
     fn new(k: u32) -> Self{
         Self { head: None, k, min: 0, max: 2u64.pow(k) - 1 }
+    }
+
+    fn finger_ranges(&self) -> Vec<u64>{
+        let mut ranges = vec![];
+        for i in 0..self.k{
+            ranges.push(2u64.pow(i));
+        }
+        ranges
     }
 
     fn head(&self) -> NodeRef{
@@ -209,7 +236,12 @@ impl HashRing{
                 let node = temp.clone();
                 println!("Node hash value: {}", node.hash_value());
                 println!("Resources: {:?}", node.resources().keys().collect::<Vec<&u64>>());
+
+                // print finger table
+                println!("Finger table: {:?}", node.inspect_finger_table() )
             }
+
+
             temp = temp.next();
             if temp.hash_value() == self.head().hash_value(){
                 break;
@@ -217,6 +249,28 @@ impl HashRing{
         }
         println!("****")
     }
+
+    fn build_finger_tables(&mut self){
+        if self.head.is_none(){
+            return;
+        }
+
+        let finger_ranges = self.finger_ranges();
+        let mut temp = self.head();
+        loop{
+            for (i, range) in finger_ranges.iter().enumerate(){
+                let finger_hash = (temp.hash_value() + range - 1) % (2u64.pow(self.k));
+                let finger_node = self.lookup_node_mut(finger_hash);
+                temp.set_finger(*range, finger_node);
+            }
+
+            temp = temp.next();
+            if temp.hash_value() == self.head().hash_value(){
+                break;
+            }
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -251,6 +305,8 @@ mod tests{
         hr.add_node(RefCell::new(Node::new(5)).into());
         hr.add_node(RefCell::new(Node::new(27)).into());
         hr.add_node(RefCell::new(Node::new(30)).into());
+
+        hr.build_finger_tables();
         hr.print_hash_ring();
     }
 
