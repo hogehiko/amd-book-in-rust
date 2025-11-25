@@ -1,10 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 
-
 type NodeRef = Rc<RefCell<Node>>;
 
 
-trait NodeRefExt{
+pub trait NodeRefExt{
     fn insert(self, hash_value: u64, value: u64);
 
     fn hash_value(&self) -> u64;
@@ -88,7 +87,7 @@ impl NodeRefExt for NodeRef{
     }
 }
 
-struct Node{
+pub struct Node{
     hash_value: u64,
     resources: HashMap<u64, u64>,
     next: Option<NodeRef>, // if none, refer to itself
@@ -155,7 +154,7 @@ impl HashRing{
         }
     }
 
-    fn lookup_node_mut(&mut self, hash_value: u64) -> NodeRef{
+    fn lookup_node(&mut self, hash_value: u64) -> NodeRef{
         if self.is_in_legal_range(hash_value){
             let mut temp = self.head();
             // let next = temp.next();
@@ -173,13 +172,44 @@ impl HashRing{
         panic!("Hash value out of range");
     }
 
+    pub fn chord_lookup(&mut self, hash_value: u64) -> NodeRef{
+        if self.is_in_legal_range(hash_value){
+            let mut temp = self.head();
+            loop{
+                let finger_table = temp.finger_table();
+                let mut found = false;
+
+                for (_i, node) in finger_table.iter(){
+                    if self.distance(temp.hash_value(), hash_value) >
+                        self.distance(node.hash_value(), hash_value){
+                            temp = node.clone();
+                            found = true;
+                            break;
+                        }
+                }
+
+                if !found{
+                    while self.distance(temp.hash_value(), hash_value) >
+                        self.distance(temp.next().hash_value(), hash_value){
+                        // temp = temp.nesxt;``
+                        temp = temp.next();
+                        if temp.hash_value() == hash_value{
+                            return temp
+                        }
+                    }
+                    return temp.next();
+                }
+            }
+        }else{
+            panic!("Hash value out of range");
+        }
+    }
+
     pub fn add_resource(&mut self, hash_value: u64){
         if self.is_in_legal_range(hash_value){
-            println!("Adding a resource {} ...", hash_value);
-            let target_node = self.lookup_node_mut(hash_value);
+            let target_node = self.chord_lookup(hash_value);
             let target_node_hash = target_node.hash_value();
             target_node.insert(hash_value, hash_value);
-            println!("Added resource with hash value {} to node {}", hash_value, target_node_hash);
         }
     }
 
@@ -204,16 +234,12 @@ impl HashRing{
                 new_node.set_next(new_node.clone());
                 new_node.set_previous(new_node.clone());
                 self.head = Some(new_node.clone());
-                println!("Added head node with hash value {}", new_node.hash_value());
             }else{
-                let temp = self.lookup_node_mut(new_node.hash_value());
+                let temp = self.chord_lookup(new_node.hash_value());
                 new_node.set_next(temp.clone());
                 new_node.set_previous(temp.previous());
                 new_node.next().set_previous(new_node.clone());
                 new_node.previous().set_next(new_node.clone());
-                println!("Added node with hash value {}", new_node.hash_value());
-                println!("Its prev is {}", new_node.previous().hash_value());
-                println!("Its next is {}", new_node.next().hash_value());
 
                 self.move_resources(new_node.clone(), new_node.next(),false);
                 if new_node.hash_value() < self.head().hash_value(){
@@ -247,9 +273,8 @@ impl HashRing{
                 break;
             }
         }
-        println!("****")
+        println!("****");
     }
-
     fn build_finger_tables(&mut self){
         if self.head.is_none(){
             return;
@@ -260,7 +285,7 @@ impl HashRing{
         loop{
             for (i, range) in finger_ranges.iter().enumerate(){
                 let finger_hash = (temp.hash_value() + range - 1) % (2u64.pow(self.k));
-                let finger_node = self.lookup_node_mut(finger_hash);
+                let finger_node = self.chord_lookup(finger_hash);
                 temp.set_finger(*range, finger_node);
             }
 
@@ -309,5 +334,29 @@ mod tests{
         hr.build_finger_tables();
         hr.print_hash_ring();
     }
+
+    #[test]
+    fn performance_test(){
+        let start= std::time::Instant::now();
+        let mut hr = HashRing::new(20);
+        let max = hr.max;
+
+        for i in (0..5000){
+            let random_value: u64 = rand::random::<u64>() % max;
+            hr.add_node(RefCell::new(Node::new(random_value)).into());            
+        }
+
+        hr.build_finger_tables();
+
+        for i in (0..50000){
+            let random_value: u64 = rand::random::<u64>() % max;
+            hr.add_resource(random_value);            
+        }
+
+        let duration = start.elapsed();
+        println!("Time elapsed in expensive_function() is: {:?}", duration);
+
+    }
+
 
 }
